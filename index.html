@@ -23,7 +23,7 @@
         }
         #conductor-input {
             width: 600px;
-            height: 150px;
+            height: 450px;
         }
     #results-container {
             position: absolute;
@@ -62,6 +62,9 @@
         - <strong>Zoom:</strong> Mouse wheel<br>
         - <strong>Pan:</strong> Right-click and drag
         </p>
+        <p><strong>Available Colors:</strong><br>
+        red, green, blue, yellow, orange, purple, cyan, magenta, white, black, gray
+        </p>
     </div>
     <div id="input-container">
         <textarea id="conductor-input" placeholder="Enter conductor data here..."></textarea>
@@ -75,7 +78,7 @@
         <input type="range" id="light-slider" min="0" max="2" value="1" step="0.1" oninput="updateLightIntensity()">
         <br>
         <label for="vector-scale-slider">Vector Scale:</label>
-        <input type="range" id="vector-scale-slider" min="0.1" max="2" value="1" step="0.05" oninput="run()">
+        <input type="range" id="vector-scale-slider" min="0.001" max="0.1" value="0.025" step="0.001" oninput="run()">
     </div>
     <div id="results-container"></div>
 
@@ -319,7 +322,7 @@
             return phase_forces;
         }
 
-        function plot_3d_conductors(conductors, force_scale = 0.01) {
+        function plot_3d_conductors(conductors, force_scale = 1) {
             // Clear previous objects
             while(root.children.length > 0){
                 root.remove(root.children[0]);
@@ -400,7 +403,7 @@
 
         function run() {
             const conductor_data = document.getElementById('conductor-input').value;
-            const force_scale = 0.1 * document.getElementById('vector-scale-slider').value;
+            const force_scale = document.getElementById('vector-scale-slider').value;
             conductors = parse_conductors(conductor_data);
             solve_for_forces(conductors);
             plot_3d_conductors(conductors, force_scale);
@@ -417,7 +420,8 @@
         animate();
 
         // --- Default conductor data ---
-        document.getElementById('conductor-input').value = `# Name; color; current; width; height; start_x,y,z; rel_x,y,z; ...         ph A
+        document.getElementById('conductor-input').value = `# Name; color; current; width; height; start_x,y,z; rel_x,y,z; ...         
+ph A
 L11; red; 73000; 100; 10; 0,0,0; 0,0,300; -100,0,100; 0,0,400
 L12; red; 73000; 100; 10; 20,0,0; 0,0,300; -100,0,100; 0,0,400
 
@@ -425,8 +429,9 @@ ph B
 L21; green; -35000; 100; 10; 130,0,0; 0,0,300; 0,100,100; 0,0,400
 L22; green; -35000; 100; 10; 150,0,0; 0,0,300; 0,100,100; 0,0,400
 
-phase 2
+ph C
 L31; blue; -35000; 100; 10; 260,0,0; 0,0,300; 100,0,100; 0,0,400
-L32; blue; -35000; 100; 10; 280,0,0; 0,0,300; 100,0,100; 0,0,400`;    </script>
+L32; blue; -35000; 100; 10; 280,0,0; 0,0,300; 100,0,100; 0,0,400`;
+        run();    </script>
 </body>
 </html>
