@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>F3D - 3D Force and Field Visualizer</title>
+    <style>
+        body { margin: 0; background-color: #8fa9c1; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: black;
+            font-family: Arial, sans-serif;
+        }
+        #input-container {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(255,255,255,0.5);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        #conductor-input {
+            width: 600px;
+            height: 150px;
+        }
+    #results-container {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255,255,255,0.5);
+            padding: 10px;
+            border-radius: 5px;
+            color: black;
+            font-family: Arial, sans-serif;
+            max-height: 90%;
+            overflow-y: auto;
+        }
+    #help-container {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255,255,255,0.5);
+            padding: 10px;
+            border-radius: 5px;
+            color: black;
+            font-family: Arial, sans-serif;
+            max-width: 300px;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">F3D - 3D Force and Field Visualizer</div>
+    <div id="help-container">
+        <h3>Help</h3>
+        <p><strong>Conductor Format:</strong><br>
+        <code>Name; color; current; width; height; start_x,y,z; rel_x,y,z; ...</code>
+        </p>
+        <p><strong>3D Navigation:</strong><br>
+        - <strong>Rotate:</strong> Left-click and drag<br>
+        - <strong>Zoom:</strong> Mouse wheel<br>
+        - <strong>Pan:</strong> Right-click and drag
+        </p>
+    </div>
+    <div id="input-container">
+        <textarea id="conductor-input" placeholder="Enter conductor data here..."></textarea>
+        <br>
+        <button onclick="run()">Visualize</button>
+        <button onclick="showCSV()">Get Results as CSV</button>
+        <button onclick="zoomToFit()">Zoom to Fit</button>
+        <button onclick="resetView()">Reset View</button>
+        <br>
+        <label for="light-slider">Light Intensity:</label>
+        <input type="range" id="light-slider" min="0" max="2" value="1" step="0.1" oninput="updateLightIntensity()">
+        <br>
+        <label for="vector-scale-slider">Vector Scale:</label>
+        <input type="range" id="vector-scale-slider" min="0.0001" max="0.002" value="0.001" step="0.0001" oninput="run()">
+    </div>
+    <div id="results-container"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        // --- Basic setup ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x8fa9c1);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        camera.position.z = 500;
+        controls.update();
+
+        const root = new THREE.Object3D();
+        root.rotation.x = -Math.PI / 2;
+        scene.add(root);
+
+        let ambientLight, directionalLight1, directionalLight2;
+        let conductors = [];
+
+        function updateLightIntensity() {
+            const intensity = document.getElementById('light-slider').value;
+            if (ambientLight) ambientLight.intensity = intensity * 0.6;
+            if (directionalLight1) directionalLight1.intensity = intensity * 0.4;
+            if (directionalLight2) directionalLight2.intensity = intensity * 0.4;
+        }
+
+        function showCSV() {
+            let csvContent = "data:text/csv;charset=utf-8,";
+            csvContent += "Name,Color,Current,Width,Height,Fx,Fy,Fz,Force Magnitude\n";
+            conductors.forEach(c => {
+                const force = c.total_force_vector;
+                const force_magnitude = force.length();
+                csvContent += `${c.name},${c.color},${c.current},${c.width},${c.height},${force.x.toFixed(2)},${force.y.toFixed(2)},${force.z.toFixed(2)},${force_magnitude.toFixed(2)}\n`;
+            });
+            const encodedUri = encodeURI(csvContent);
+            window.open(encodedUri);
+        }
+
+        function zoomToFit() {
+            const box = new THREE.Box3().setFromObject(root);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const fov = camera.fov * (Math.PI / 180);
+            let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+
+            cameraZ *= 1.5; // zoom out a bit
+
+            camera.position.set(center.x, center.y, center.z + cameraZ);
+            camera.lookAt(center);
+            controls.target.copy(center);
+            controls.update();
+        }
+
+        function resetView() {
+            camera.position.z = 500;
+            camera.position.x = 0;
+            camera.position.y = 0;
+            controls.target.set(0,0,0);
+            controls.update();
+        }
+
+        // --- Core Logic (to be translated from Python) ---
+
+        class Conductor {
+            constructor(name, color, current, width, height, geometry, phase, phase_description) {
+                this.name = name;
+                this.color = color;
+                this.current = current;
+                this.width = width;
+                this.height = height;
+                this.geometry = geometry.map(p => new THREE.Vector3(p[0], p[1], p[2]));
+                this.phase = phase;
+                this.phase_description = phase_description;
+                this.total_force_vector = new THREE.Vector3(0, 0, 0);
+                this.segments = [];
+                this.gen_vector_list();
+            }
+
+            gen_vector_list() {
+                for (let i = 0; i < this.geometry.length - 1; i++) {
+                    const p1 = this.geometry[i];
+                    const p2 = this.geometry[i+1];
+                    this.segments.push(new THREE.Vector3().subVectors(p2, p1));
+                }
+            }
+        }
+
+        function parse_conductors(data) {
+            const conductors = [];
+            let current_phase = 1;
+            let phase_description = "";
+            const lines = data.trim().split('\n');
+            for (const line of lines) {
+                if (line.startsWith("#") || !line.trim()) {
+                    continue;
+                }
+                if (line.toLowerCase().includes("ph")) {
+                    if (conductors.some(c => c.phase)) {
+                        current_phase++;
+                    }
+                    phase_description = line.split("ph ")[1];
+                    continue;
+                }
+
+                const parts = line.trim().split(';');
+                const name = parts[0];
+                const color = parts[1].trim();
+                const current = parseFloat(parts[2]);
+                const width = parseFloat(parts[3]);
+                const height = parseFloat(parts[4]);
+                const points_str = parts.slice(5);
+                const points = points_str.map(p_str => p_str.split(',').map(parseFloat));
+                
+                const raw_points = get_raw_points(points);
+
+                conductors.push(
+                    new Conductor(name, color, current, width, height, raw_points, current_phase, phase_description)
+                );
+            }
+            return conductors;
+        }
+
+        function get_raw_points(list_of_points) {
+            const output_list = [];
+            output_list.push(list_of_points[0]);
+
+            for (let i = 1; i < list_of_points.length; i++) {
+                const previous_point = output_list[i-1];
+                const point = list_of_points[i];
+                output_list.push([previous_point[0] + point[0], previous_point[1] + point[1], previous_point[2] + point[2]]);
+            }
+            return output_list;
+        }
+
+        const MU_0_OVER_4PI = 1e-7;
+
+        function calculate_force_on_segment(current1, segment1_start_pt, segment1_end_pt, current2, segment2_start_pt, segment2_end_pt, num_subdivisions = 10) {
+            let total_force = new THREE.Vector3(0, 0, 0);
+
+            const points1 = [];
+            for (let i = 0; i <= num_subdivisions; i++) {
+                points1.push(new THREE.Vector3().lerpVectors(segment1_start_pt, segment1_end_pt, i / num_subdivisions));
+            }
+
+            const sub_segments1 = [];
+            for (let i = 0; i < num_subdivisions; i++) {
+                const dl1_vec = new THREE.Vector3().subVectors(points1[i + 1], points1[i]);
+                const midpoint1 = new THREE.Vector3().addVectors(points1[i], points1[i + 1]).multiplyScalar(0.5);
+                sub_segments1.push({ dl_vector: dl1_vec, midpoint: midpoint1 });
+            }
+
+            const points2 = [];
+            for (let i = 0; i <= num_subdivisions; i++) {
+                points2.push(new THREE.Vector3().lerpVectors(segment2_start_pt, segment2_end_pt, i / num_subdivisions));
+            }
+
+            const sub_segments2 = [];
+            for (let i = 0; i < num_subdivisions; i++) {
+                const dl2_vec = new THREE.Vector3().subVectors(points2[i + 1], points2[i]);
+                const midpoint2 = new THREE.Vector3().addVectors(points2[i], points2[i + 1]).multiplyScalar(0.5);
+                sub_segments2.push({ dl_vector: dl2_vec, midpoint: midpoint2 });
+            }
+
+            for (const sub_seg1 of sub_segments1) {
+                const dl1_vec = sub_seg1.dl_vector;
+                const midpoint1 = sub_seg1.midpoint;
+
+                for (const sub_seg2 of sub_segments2) {
+                    const dl2_vec = sub_seg2.dl_vector;
+                    const midpoint2 = sub_seg2.midpoint;
+
+                    const r_vector = new THREE.Vector3().subVectors(midpoint1, midpoint2);
+                    const r_magnitude = r_vector.length();
+
+                    if (r_magnitude < 1e-9) {
+                        continue;
+                    }
+
+                    const r_hat = r_vector.clone().normalize();
+                    const dl1_cross_r_hat = new THREE.Vector3().crossVectors(dl1_vec, r_hat);
+                    const force_contribution = new THREE.Vector3().crossVectors(dl2_vec, dl1_cross_r_hat);
+                    force_contribution.multiplyScalar((MU_0_OVER_4PI * current1 * current2) / (r_magnitude ** 2));
+                    total_force.add(force_contribution);
+                }
+            }
+            return total_force;
+        }
+
+        function solve_for_forces(conductors) {
+            for (let i = 0; i < conductors.length; i++) {
+                for (let j = 0; j < conductors.length; j++) {
+                    if (i === j) continue;
+
+                    const conductorA = conductors[i];
+                    const conductorB = conductors[j];
+
+                    for (let k = 0; k < conductorA.geometry.length - 1; k++) {
+                        const ptA_CA = conductorA.geometry[k];
+                        const ptB_CA = conductorA.geometry[k+1];
+
+                        for (let l = 0; l < conductorB.geometry.length - 1; l++) {
+                            const ptA_CB = conductorB.geometry[l];
+                            const ptB_CB = conductorB.geometry[l+1];
+                            
+                            const dF = calculate_force_on_segment(
+                                conductorA.current,
+                                ptA_CA,
+                                ptB_CA,
+                                conductorB.current,
+                                ptA_CB,
+                                ptB_CB,
+                                10
+                            );
+                            conductorA.total_force_vector.add(dF);
+                        }
+                    }
+                }
+            }
+        }
+
+        function plot_3d_conductors(conductors, force_scale = 1) {
+            // Clear previous objects
+            while(root.children.length > 0){
+                root.remove(root.children[0]);
+            }
+
+            // Add lights
+            ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            root.add(ambientLight);
+            directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.4);
+            directionalLight1.position.set(1, 1, 1);
+            root.add(directionalLight1);
+            directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4);
+            directionalLight2.position.set(-1, -1, -1);
+            root.add(directionalLight2);
+
+            const all_points = [];
+            const results_container = document.getElementById('results-container');
+            results_container.innerHTML = '';
+
+            for (const conductor of conductors) {
+                const material = new THREE.MeshLambertMaterial({ color: conductor.color });
+                for (let i = 0; i < conductor.geometry.length - 1; i++) {
+                    const p1 = conductor.geometry[i];
+                    const p2 = conductor.geometry[i+1];
+                    all_points.push(p1, p2);
+
+                    const segment_vector = new THREE.Vector3().subVectors(p2, p1);
+                    const segment_length = segment_vector.length();
+                    const segment_midpoint = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+
+                    const geometry = new THREE.BoxGeometry(conductor.height, conductor.width, segment_length);
+                    const mesh = new THREE.Mesh(geometry, material);
+                    mesh.position.copy(segment_midpoint);
+                    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), segment_vector.clone().normalize());
+                    root.add(mesh);
+
+                    const edges = new THREE.EdgesGeometry(geometry);
+                    const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x000000 }));
+                    line.position.copy(segment_midpoint);
+                    line.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), segment_vector.clone().normalize());
+                    root.add(line);
+
+                    const force_per_segment = conductor.total_force_vector.clone().divideScalar(conductor.segments.length);
+                    const arrow_helper = new THREE.ArrowHelper(force_per_segment.clone().normalize(), segment_midpoint, force_per_segment.length() * force_scale, conductor.color);
+                    root.add(arrow_helper);
+                }
+
+                const force = conductor.total_force_vector;
+                const force_magnitude = force.length();
+                results_container.innerHTML += `
+                    <div>
+                        <strong>${conductor.name}</strong><br>
+                        Force: ${force_magnitude.toFixed(2)} N<br>
+                        Fx: ${force.x.toFixed(2)}, Fy: ${force.y.toFixed(2)}, Fz: ${force.z.toFixed(2)}
+                    </div>
+                    <hr>
+                `;
+            }
+
+            updateLightIntensity();
+        }
+
+        function run() {
+            const conductor_data = document.getElementById('conductor-input').value;
+            const force_scale = document.getElementById('vector-scale-slider').value;
+            conductors = parse_conductors(conductor_data);
+            solve_for_forces(conductors);
+            plot_3d_conductors(conductors, force_scale);
+            zoomToFit();
+        }
+
+        // --- Animation loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // --- Default conductor data ---
+        document.getElementById('conductor-input').value = "# Name; color; current; width; height; start_x,y,z; rel_x,y,z; ...\n        phase 1\n        L1; red; 22000; 100; 10; 0,0,0; 0,0,300; -100,100,100; 0,0,400\n        L2; green; -11000; 100; 10; 130,0,0; 0,0,300; 0,100,100; 0,0,400\n        phase 2\n        L3; blue; -11000; 100; 10; 260,0,0; 0,0,300; 100,100,100; 0,0,400\n        L4; yellow; 5000; 100; 10; 0,100,0; 0,0,300";
+
+    </script>
+</body>
+</html>
