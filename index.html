@@ -75,7 +75,7 @@
         <input type="range" id="light-slider" min="0" max="2" value="1" step="0.1" oninput="updateLightIntensity()">
         <br>
         <label for="vector-scale-slider">Vector Scale:</label>
-        <input type="range" id="vector-scale-slider" min="0.0001" max="0.002" value="0.001" step="0.0001" oninput="run()">
+        <input type="range" id="vector-scale-slider" min="0.1" max="2" value="1" step="0.05" oninput="run()">
     </div>
     <div id="results-container"></div>
 
@@ -305,7 +305,21 @@
             }
         }
 
-        function plot_3d_conductors(conductors, force_scale = 1) {
+        function calculate_phase_forces(conductors) {
+            const phase_forces = {};
+            for (const conductor of conductors) {
+                if (!phase_forces[conductor.phase]) {
+                    phase_forces[conductor.phase] = {
+                        force: new THREE.Vector3(0, 0, 0),
+                        description: conductor.phase_description
+                    };
+                }
+                phase_forces[conductor.phase].force.add(conductor.total_force_vector);
+            }
+            return phase_forces;
+        }
+
+        function plot_3d_conductors(conductors, force_scale = 0.01) {
             // Clear previous objects
             while(root.children.length > 0){
                 root.remove(root.children[0]);
@@ -323,7 +337,23 @@
 
             const all_points = [];
             const results_container = document.getElementById('results-container');
-            results_container.innerHTML = '';
+            results_container.innerHTML = '<h3>Total Phase Forces</h3>';
+
+            const phase_forces = calculate_phase_forces(conductors);
+            for (const phase in phase_forces) {
+                const force = phase_forces[phase].force;
+                const force_magnitude = force.length();
+                results_container.innerHTML += `
+                    <div>
+                        <strong>Phase: ${phase_forces[phase].description}</strong><br>
+                        Force: ${force_magnitude.toFixed(2)} N<br>
+                        Fx: ${force.x.toFixed(2)}, Fy: ${force.y.toFixed(2)}, Fz: ${force.z.toFixed(2)}
+                    </div>
+                    <hr>
+                `;
+            }
+
+            results_container.innerHTML += '<h3>Individual Conductor Forces</h3>';
 
             for (const conductor of conductors) {
                 const material = new THREE.MeshLambertMaterial({ color: conductor.color });
@@ -370,7 +400,7 @@
 
         function run() {
             const conductor_data = document.getElementById('conductor-input').value;
-            const force_scale = document.getElementById('vector-scale-slider').value;
+            const force_scale = 0.1 * document.getElementById('vector-scale-slider').value;
             conductors = parse_conductors(conductor_data);
             solve_for_forces(conductors);
             plot_3d_conductors(conductors, force_scale);
@@ -387,8 +417,16 @@
         animate();
 
         // --- Default conductor data ---
-        document.getElementById('conductor-input').value = "# Name; color; current; width; height; start_x,y,z; rel_x,y,z; ...\n        phase 1\n        L1; red; 22000; 100; 10; 0,0,0; 0,0,300; -100,100,100; 0,0,400\n        L2; green; -11000; 100; 10; 130,0,0; 0,0,300; 0,100,100; 0,0,400\n        phase 2\n        L3; blue; -11000; 100; 10; 260,0,0; 0,0,300; 100,100,100; 0,0,400\n        L4; yellow; 5000; 100; 10; 0,100,0; 0,0,300";
+        document.getElementById('conductor-input').value = `# Name; color; current; width; height; start_x,y,z; rel_x,y,z; ...         ph A
+L11; red; 73000; 100; 10; 0,0,0; 0,0,300; -100,0,100; 0,0,400
+L12; red; 73000; 100; 10; 20,0,0; 0,0,300; -100,0,100; 0,0,400
 
-    </script>
+ph B
+L21; green; -35000; 100; 10; 130,0,0; 0,0,300; 0,100,100; 0,0,400
+L22; green; -35000; 100; 10; 150,0,0; 0,0,300; 0,100,100; 0,0,400
+
+phase 2
+L31; blue; -35000; 100; 10; 260,0,0; 0,0,300; 100,0,100; 0,0,400
+L32; blue; -35000; 100; 10; 280,0,0; 0,0,300; 100,0,100; 0,0,400`;    </script>
 </body>
 </html>
